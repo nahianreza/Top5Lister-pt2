@@ -6,10 +6,13 @@ import DBManager from './db/DBManager';
 
 // THESE ARE OUR REACT COMPONENTS
 import DeleteModal from './components/DeleteModal';
-import Banner from './components/Banner.js'
-import Sidebar from './components/Sidebar.js'
+import Banner from './components/Banner.js';
+import Sidebar from './components/Sidebar.js';
 import Workspace from './components/Workspace.js';
-import Statusbar from './components/Statusbar.js'
+import Statusbar from './components/Statusbar.js';
+import jsTPS from './common/jsTPS.js';
+import ChangeItem_Transaction from './Transaction/ChangeItem_Transaction';
+import MoveItem_Transaction from './Transaction/MoveItem_Transaction';
 
 class App extends React.Component {
     constructor(props) {
@@ -17,6 +20,7 @@ class App extends React.Component {
 
         // THIS WILL TALK TO LOCAL STORAGE
         this.db = new DBManager();
+        this.tps = new jsTPS();
 
         // GET THE SESSION DATA FROM OUR DATA MANAGER
         let loadedSessionData = this.db.queryGetSessionData();
@@ -24,7 +28,9 @@ class App extends React.Component {
         // SETUP THE INITIAL STATE
         this.state = {
             currentList : null,
-            sessionData : loadedSessionData
+            sessionData : loadedSessionData,
+            deletinglist : null,
+
         }
     }
     sortKeyNamePairsByName = (keyNamePairs) => {
@@ -64,13 +70,19 @@ class App extends React.Component {
                 nextKey: prevState.sessionData.nextKey + 1,
                 counter: prevState.sessionData.counter + 1,
                 keyNamePairs: updatedPairs
-            }
+            },
+            canUndo: this.tps.hasTransactionToUndo(),
+            canRedo: this.tps.hasTransactionToRedo()
         }), () => {
             // PUTTING THIS NEW LIST IN PERMANENT STORAGE
             // IS AN AFTER EFFECT
+            this.tps.clearAllTransactions();
             this.db.mutationCreateList(newList);
+            this.db.mutationUpdateSessionData(this.state.sessionData);
         });
     }
+    // let queuedtransaction = new MoveItem_Transaction(this.state, oldindex, newindex)
+    // this.tps.addTransaction(queuedtransaction);
     renameList = (key, newName) => {
         let newKeyNamePairs = [...this.state.sessionData.keyNamePairs];
         // NOW GO THROUGH THE ARRAY AND FIND THE ONE TO RENAME
@@ -104,12 +116,33 @@ class App extends React.Component {
             this.db.mutationUpdateSessionData(this.state.sessionData);
         });
     }
+    renameItem = (index, newName) => {
+        let item = this.state.currentList.items;
+
+        for (let i =0; i < item.length; i++){
+            if (i === index)
+                item[i]= newName;
+        }
+        this.setState(prevState => ({
+            currentList: prevState.currentList,
+            sessionData: prevState.sessionData
+            
+        }), () => {
+            // AN AFTER EFFECT IS THAT WE NEED TO MAKE SURE
+            // THE TRANSACTION STACK IS CLEARED
+            
+            this.db.mutationUpdateList(this.state.currentList);
+        });
+        
+    }
     // THIS FUNCTION BEGINS THE PROCESS OF LOADING A LIST FOR EDITING
     loadList = (key) => {
         let newCurrentList = this.db.queryGetList(key);
         this.setState(prevState => ({
             currentList: newCurrentList,
-            sessionData: prevState.sessionData
+            sessionData: prevState.sessionData,
+            canUndo: this.tps.hasTransactionToUndo(),
+            canRedo: this.tps.hasTransactionToRedo()
         }), () => {
             // ANY AFTER EFFECTS?
         });
@@ -119,16 +152,20 @@ class App extends React.Component {
         this.setState(prevState => ({
             currentList: null,
             listKeyPairMarkedForDeletion : prevState.listKeyPairMarkedForDeletion,
-            sessionData: this.state.sessionData
+            sessionData: this.state.sessionData,
+            canUndo: this.tps.hasTransactionToUndo(),
+            canRedo: this.tps.hasTransactionToRedo()
         }), () => {
             // ANY AFTER EFFECTS?
+            this.tps.clearAllTransactions();
+            this.db.mutationUpdateSessionData(this.state.sessionData);
         });
     }
-    deleteList = () => {
-        // SOMEHOW YOU ARE GOING TO HAVE TO FIGURE OUT
-        // WHICH LIST IT IS THAT THE USER WANTS TO
-        // DELETE AND MAKE THAT CONNECTION SO THAT THE
-        // NAME PROPERLY DISPLAYS INSIDE THE MODAL
+    deleteList = (key) => {
+        this.setState((prevState) => ({
+            currentList : this.state.currentList,
+            deletinglist : key
+            }));
         this.showDeleteListModal();
     }
     // THIS FUNCTION SHOWS THE MODAL FOR PROMPTING THE USER
@@ -158,10 +195,13 @@ class App extends React.Component {
                     renameListCallback={this.renameList}
                 />
                 <Workspace
-                    currentList={this.state.currentList} />
+                    currentList={this.state.currentList} 
+                    renameItemCallback={this.renameItem}
+                    />
                 <Statusbar 
                     currentList={this.state.currentList} />
                 <DeleteModal
+                    listKeyPair = {this.state.deletinglist}
                     hideDeleteListModalCallback={this.hideDeleteListModal}
                 />
             </div>
